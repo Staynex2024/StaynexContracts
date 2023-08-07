@@ -330,6 +330,99 @@ contract ERC165 is IERC165 {
     }
 }
 
+/**
+ * @dev Interface for the NFT Royalty Standard.
+ *
+ * A standardized way to retrieve royalty payment information for non-fungible tokens (NFTs) to enable universal
+ * support for royalty payments across all NFT marketplaces and ecosystem participants.
+ */
+interface IERC2981  {
+    /**
+     * @dev Returns how much royalty is owed and to whom, based on a sale price that may be denominated in any unit of
+     * exchange. The royalty amount is denominated and should be paid in that same unit of exchange.
+     */
+    function royaltyInfo(uint256 tokenId, uint256 salePrice) external view returns (address receiver, uint256 royaltyAmount);
+}
+
+contract ERC2981 is IERC2981, IERC165 {
+    struct RoyaltyInfo {
+        address receiver;
+        uint96 royaltyFraction;
+    }
+
+    RoyaltyInfo private _defaultRoyaltyInfo;
+    mapping(uint256 => RoyaltyInfo) private _tokenRoyaltyInfo;
+
+
+    function royaltyInfo(uint256 tokenId, uint256 salePrice) public view returns (address, uint256) {
+        RoyaltyInfo memory royalty = _tokenRoyaltyInfo[tokenId];
+
+        if (royalty.receiver == address(0)) {
+            royalty = _defaultRoyaltyInfo;
+        }
+
+        uint256 royaltyAmount = (salePrice * uint256(royalty.royaltyFraction)) / _feeDenominator();
+
+        return (royalty.receiver, royaltyAmount);
+    }
+
+    /**
+     * @dev The denominator with which to interpret the fee set in {_setTokenRoyalty} and {_setDefaultRoyalty} as a
+     * fraction of the sale price. Defaults to 10000 so fees are expressed in basis points, but may be customized by an
+     * override.
+     */
+    function _feeDenominator() internal pure returns (uint96) {
+        return 10000;
+    }
+
+    /**
+     * @dev Sets the royalty information that all ids in this contract will default to.
+     *
+     * Requirements:
+     *
+     * - `receiver` cannot be the zero address.
+     * - `feeNumerator` cannot be greater than the fee denominator.
+     */
+    function _setDefaultRoyalty(address receiver, uint96 feeNumerator) internal {
+        uint256 denominator = _feeDenominator();
+        require(feeNumerator <= denominator, "Invalid default royalty");
+        require(receiver != address(0), "Invalid default royalty receiver");
+
+        _defaultRoyaltyInfo = RoyaltyInfo(receiver, feeNumerator);
+    }
+
+    /**
+     * @dev Removes default royalty information.
+     */
+    function _deleteDefaultRoyalty() internal {
+        delete _defaultRoyaltyInfo;
+    }
+
+    /**
+     * @dev Sets the royalty information for a specific token id, overriding the global default.
+     *
+     * Requirements:
+     *
+     * - `receiver` cannot be the zero address.
+     * - `feeNumerator` cannot be greater than the fee denominator.
+     */
+    function _setTokenRoyalty(uint256 tokenId, address receiver, uint96 feeNumerator) internal {
+        uint256 denominator = _feeDenominator();
+        require(feeNumerator <= denominator, "Invalid token royalty");
+        require(receiver != address(0), "Invalid token royalty receiver");
+
+        _tokenRoyaltyInfo[tokenId] = RoyaltyInfo(receiver, feeNumerator);
+    }
+
+    /**
+     * @dev Resets royalty information for the token id back to the global default.
+     */
+    function _resetTokenRoyalty(uint256 tokenId) internal {
+        delete _tokenRoyaltyInfo[tokenId];
+    }
+}
+
+
 // File: openzeppelin-solidity/contracts/token/ERC721/ERC721.sol
 
 /**
@@ -1699,8 +1792,9 @@ contract ReentrancyGuard {
 
 // File: contracts/STAYNEX.sol
 
-contract STAYNEX_GENISIS is TradeableERC721, ReentrancyGuard {
+contract STAYNEX_GENISIS is TradeableERC721, ReentrancyGuard, ERC2981 {
   string private _baseTokenURI;
+  address public superAdmin = 0x7A48001Cc143051feD84fb3A619bfe8E947Be4c3; // replace with staynex admin wallet address
 
   constructor(
     string memory _name,
@@ -1717,6 +1811,7 @@ contract STAYNEX_GENISIS is TradeableERC721, ReentrancyGuard {
     
   ) TradeableERC721(_name, _symbol, _supply, _proxyRegistryAddress, _version, _gravity_locked, _ERC20, _timeLimit, _redemptionTimeLimit, _maxDaysRedemable) public {
     _baseTokenURI = Strings.strConcat(baseURI, Strings.fromAddress(address(this)), "/");
+    _setDefaultRoyalty(superAdmin, 500); // 5% (500 / 10000) of the sale price of the NFT
   }
 
   function transferVersion() public pure returns (string memory) {
@@ -1731,5 +1826,14 @@ contract STAYNEX_GENISIS is TradeableERC721, ReentrancyGuard {
   function setBaseTokenURI(string memory uri) public onlyOwner {
     _baseTokenURI = uri;
   }
+
+  
+  
+  function supportsInterface(bytes4 interfaceId) public view returns (bool) {
+    return interfaceId == 0x01ffc9a7 || // IERC165:  bytes4(keccak256('supportsInterface(bytes4)'))
+           interfaceId == 0x80ac58cd || // IERC721:  bytes4(keccak256('balanceOf(address)')) ^ bytes4(keccak256('ownerOf(uint256)')) ^ bytes4(keccak256('approve(address,uint256)')) ^ bytes4(keccak256('getApproved(uint256)')) ^ bytes4(keccak256('setApprovalForAll(address,bool)')) ^ bytes4(keccak256('isApprovedForAll(address,address)')) ^ bytes4(keccak256('transferFrom(address,address,uint256)')) ^ bytes4(keccak256('safeTransferFrom(address,address,uint256)')) ^ bytes4(keccak256('safeTransferFrom(address,address,uint256,bytes)'))
+           interfaceId == 0x2a55205a;   // IERC2981: bytes4(keccak256('royaltyInfo(uint256,uint256)'))
+  }
+
 }
  
