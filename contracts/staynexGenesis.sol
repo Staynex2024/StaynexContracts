@@ -1163,11 +1163,19 @@ contract TradeableERC721 is ERC721Full, Ownable {
     RedeemTimeLimit = _redeemTimeLimit;
     MAX = _maxDaysRedeemable++;
     propertyowner = msg.sender;
+    
   }
 
   function setMax(uint256 _upperLimit) public onlyOwner{
       MAX = _upperLimit;
   }
+    
+    event NFTMint(uint256 indexed tokenId, address indexed creator, uint256 value, uint256 timestamp);
+    event NFTBurn(uint256 indexed tokenId, address indexed owner, string method, uint256 timestamp);
+    event RedeemNights(address indexed creator, string method, uint256 nights, uint256 timestamp);
+    event RefundNights(address indexed creator, string method, uint256 nights, uint256 timestamp);
+    event RoyaltyFunction(string method, uint256 royalty, uint256 timestamp);
+
   
   
   /**
@@ -1181,10 +1189,9 @@ contract TradeableERC721 is ERC721Full, Ownable {
     _mint(_to, newTokenId);
     setInitials(msg.sender,newTokenId);
     _incrementTokenId();
+    emit NFTMint( newTokenId, msg.sender, 0, block.timestamp);
   }
-
-
-    
+  
   function publicMint(address _to) public payable {
 
     require(_currentTokenId <= tsupply, "Token supply exceeded");
@@ -1196,8 +1203,15 @@ contract TradeableERC721 is ERC721Full, Ownable {
     setInitials(msg.sender,newTokenId);
     // Transfer the payment to the payment address if there is any
     propertyowner.transfer(msg.value);
-}
-
+    
+    emit NFTMint( newTokenId, msg.sender, msg.value, block.timestamp);
+    
+    }
+ 
+    /**
+    * @dev Mints a bulk of tokens to his address with a tokenURI.
+    * @param _to address of the current owner of the token
+    */
   
   function bulkMint(address _to, uint256 _numberofTokens) public onlyOwner {
       uint256 detailsLength = _currentTokenId.add(_numberofTokens);
@@ -1206,7 +1220,7 @@ contract TradeableERC721 is ERC721Full, Ownable {
           mintTo(_to);
       }
       
-  }
+   }
     
   
   function burn(uint256 _tokenidentiy) public {
@@ -1216,6 +1230,7 @@ contract TradeableERC721 is ERC721Full, Ownable {
       _burn(msg.sender, _tokenidentiy);
       token.transfer(msg.sender, IXI_LOCKED_PER_NFT);
       BurntTokens.push(_tokenidentiy);
+      emit NFTBurn(_tokenidentiy, msg.sender, "Burn", block.timestamp);
   }
 
 	uint256 TS22 = 1650911056;
@@ -1631,7 +1646,9 @@ contract TradeableERC721 is ERC721Full, Ownable {
         }
     }
 
-    function redeemNights(uint256 _tokenidentiy, address _customerAddress, uint256 _numberDays) public {
+
+
+    function redeemNights(uint256 _tokenidentiy, uint256 _numberDays) public {
         require(ownerOf(_tokenidentiy) == msg.sender, "Only NFT owner can redeem nights");
         require(getTokenOwnerFromRecords(_tokenidentiy) == msg.sender, "CLAIM_OWNERSHIP_RIGHTS");
         uint256 nRED = getNightsRedeemed(_tokenidentiy) + _numberDays;
@@ -1640,6 +1657,7 @@ contract TradeableERC721 is ERC721Full, Ownable {
         uint256 IXI_PER_REDEEM = SafeMath.mul(_numberDays, decimal);
         token.transfer(msg.sender, IXI_PER_REDEEM);
         updateRedeemedNights(msg.sender, _numberDays, 1);
+        emit RedeemNights(msg.sender,"REDEEM_SUCCESS", _numberDays, block.timestamp);
     }
 
     function refundNights(uint256 _tokenidentiy, address _customerAddress, uint256 _numberDays) public payable returns(string memory) {
@@ -1653,14 +1671,17 @@ contract TradeableERC721 is ERC721Full, Ownable {
             uint256 IXI_PER_REFUND = SafeMath.mul(_numberDays, decimal);
             token.transfer(_customerAddress, IXI_PER_REFUND);
             updateRedeemedNights(_customerAddress, _numberDays, 0);
+            emit RefundNights(msg.sender, "REFUND_SUCCESS", _tokenidentiy, block.timestamp);
             return("REFUND_SUCCESSFUL");
-        }else if(nRED > _numberDays){
+        }else if(nRED == _numberDays){
             uint256 decimal = pow(10, 18);
             uint256 IXI_PER_REFUND = SafeMath.mul(_numberDays, decimal);
             token.transfer(_customerAddress, IXI_PER_REFUND);
             updateRedeemedNights(_customerAddress, _numberDays, 0);
+            emit RefundNights(_customerAddress, "REFUND_SUCCESS", _tokenidentiy, block.timestamp);
             return("REFUND_SUCCESSFUL");
         }else {
+            emit RefundNights(_customerAddress, "REFUND_FAILED", _tokenidentiy, block.timestamp);
             return("INVALID_NUMBER_OF_NIGHTS");
         }
 
@@ -1669,7 +1690,6 @@ contract TradeableERC721 is ERC721Full, Ownable {
   function getBurntTokens() public view returns(uint256[] memory){
      return BurntTokens;
   }
-  
   
   function pow(uint256 base, uint256 exponent) internal pure returns (uint256) {
         if (exponent == 0) {
@@ -1714,7 +1734,6 @@ contract TradeableERC721 is ERC721Full, Ownable {
       return (tsupply.add(1)).sub(BurntTokens.length);
   }
 
-
   /**
     * @dev calculates the next token ID based on value of _currentTokenId 
     * @return uint256 for the next token ID
@@ -1732,7 +1751,6 @@ contract TradeableERC721 is ERC721Full, Ownable {
     _currentTokenId++;
   }
   
-
   function baseTokenURI() public view returns (string memory) {
     return "";
   }
