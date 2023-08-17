@@ -1125,15 +1125,18 @@ contract ProxyRegistry {
 
 contract ERC20 {
     function transfer(address to, uint tokens) public returns (bool success);
+    function transferFrom(address from, address to, uint tokens) public  returns (bool success);
 }
 
 /**
  * @title TradeableERC721
  * TradeableERC721Token - ERC721 contract that whitelists a trading address, and has minting functionality.
  */
-contract TradeableERC721 is ERC721Full, Ownable {
+contract TradeableERC721 is ERC721Full, Ownable, ERC2981 {
   using Strings for string;
   using logicalMath for bytes32;
+  uint256 public chargeRate;
+  uint256 public  chargeRateERC20;
 
   address proxyRegistryAddress;
   uint256 private _currentTokenId = 0;
@@ -1143,15 +1146,17 @@ contract TradeableERC721 is ERC721Full, Ownable {
   string private IPFS_HASH;
   string private metadataDetails;
   ERC20 public token;    
+  ERC20 public payableToken;
   uint256[] public BurntTokens;
   uint256 Time;
   uint256 MAX;
   uint256 RedeemTimeLimit;
   address payable propertyowner;
+  address payable superAdmin;
+  uint256 public superAdminPoroportion;
 
-  
 
-   
+
   
   constructor(string memory _name, string memory _symbol, uint256 _supply, address _proxyRegistryAddress, string memory _version, uint256 _GRAVITY_LOCKED, address _ERC20_, uint256 _Time, uint256 _redeemTimeLimit, uint256 _maxDaysRedeemable) ERC721Full(_name, _symbol, _supply) public {
     proxyRegistryAddress = _proxyRegistryAddress;
@@ -1159,16 +1164,24 @@ contract TradeableERC721 is ERC721Full, Ownable {
     _Version = _version;
     GRAVITY_LOCKED = SafeMath.div(_GRAVITY_LOCKED,_supply);
     token = ERC20(_ERC20_);
+    superAdmin = 0x7A48001Cc143051feD84fb3A619bfe8E947Be4c3; // replace with staynex admin wallet address
+    superAdminPoroportion = 20; // set the 20% of funds that super admin should receive
+    chargeRate = 0.1 ether;
+    payableToken = ERC20(0x7A48001Cc143051feD84fb3A619bfe8E947Be4c3); // replace with erc20 token payable amount
+    chargeRateERC20 = 100000000000;
     Time = _Time; // timestamp used for burn
     RedeemTimeLimit = _redeemTimeLimit;
     MAX = _maxDaysRedeemable++;
     propertyowner = msg.sender;
+    _setDefaultRoyalty(superAdmin, 500); // 5% (500 / 10000) of the sale price of the NFT
+    emit RoyaltyFunction("setRoyality", 500, block.timestamp);
     
   }
 
   function setMax(uint256 _upperLimit) public onlyOwner{
       MAX = _upperLimit;
   }
+
     
     event NFTMint(uint256 indexed tokenId, address indexed creator, uint256 value, uint256 timestamp);
     event NFTBurn(uint256 indexed tokenId, address indexed owner, string method, uint256 timestamp);
@@ -1176,6 +1189,11 @@ contract TradeableERC721 is ERC721Full, Ownable {
     event RefundNights(address indexed creator, string method, uint256 nights, uint256 timestamp);
     event RoyaltyFunction(string method, uint256 royalty, uint256 timestamp);
 
+  function supportsInterface(bytes4 interfaceId) public view returns (bool) {
+    return interfaceId == 0x01ffc9a7 || // IERC165:  bytes4(keccak256('supportsInterface(bytes4)'))
+           interfaceId == 0x80ac58cd || // IERC721:  bytes4(keccak256('balanceOf(address)')) ^ bytes4(keccak256('ownerOf(uint256)')) ^ bytes4(keccak256('approve(address,uint256)')) ^ bytes4(keccak256('getApproved(uint256)')) ^ bytes4(keccak256('setApprovalForAll(address,bool)')) ^ bytes4(keccak256('isApprovedForAll(address,address)')) ^ bytes4(keccak256('transferFrom(address,address,uint256)')) ^ bytes4(keccak256('safeTransferFrom(address,address,uint256)')) ^ bytes4(keccak256('safeTransferFrom(address,address,uint256,bytes)'))
+           interfaceId == 0x2a55205a;   // IERC2981: bytes4(keccak256('royaltyInfo(uint256,uint256)'))
+  }
   
   
   /**
@@ -1191,20 +1209,65 @@ contract TradeableERC721 is ERC721Full, Ownable {
     _incrementTokenId();
     emit NFTMint( newTokenId, msg.sender, 0, block.timestamp);
   }
+
+  function changeChargeRate(uint256 _amount) public onlyOwner {
+      require(_amount != 0,"Amount cant be zero");
+      chargeRate = _amount;
+  }
+
+  function changeChargeRateERC20(uint256 _amount) public onlyOwner {
+      require(_amount != 0,"Amount cant be zero");
+      chargeRateERC20 = _amount;
+  }
+  
   
   function publicMint(address _to) public payable {
-
+    // chargeRate = 0.1 ether;
     require(_currentTokenId <= tsupply, "Token supply exceeded");
-    require(msg.value == 0.1 ether, "Insufficient funds");
+    require(msg.value == chargeRate, "Insufficient funds");
 
     uint256 newTokenId = _getNextTokenId();
     _mint(_to, newTokenId);
     _incrementTokenId();
     setInitials(msg.sender,newTokenId);
     // Transfer the payment to the payment address if there is any
-    propertyowner.transfer(msg.value);
-    
+    uint256 superAdminAmount = ((chargeRate).div(100)).mul(superAdminPoroportion);
+    uint256 propertyOwnerAmount = (chargeRate).sub(superAdminAmount);
+    propertyowner.transfer(propertyOwnerAmount);
+    superAdmin.transfer(superAdminAmount);
     emit NFTMint( newTokenId, msg.sender, msg.value, block.timestamp);
+    
+    }
+
+    uint256 public price;
+
+    function setPrice(uint256 _passPrice) public onlyOwner{
+        price = _passPrice;
+    }
+
+    // A function that accepts ERC20 tokens as payment
+    function payWithToken(uint256 _amount) internal  {
+        // Require that the amount is positive
+        uint256 superAdminAmount = ((chargeRateERC20).div(100)).mul(superAdminPoroportion);
+        uint256 propertyOwnerAmount = (chargeRateERC20).sub(superAdminAmount);
+        ERC20(payableToken).transferFrom(msg.sender, propertyowner, propertyOwnerAmount);
+        ERC20(payableToken).transferFrom(msg.sender, superAdmin, superAdminAmount);
+        
+    }
+
+
+    function publicMintWithERC20(address _to) public payable {
+        require(_currentTokenId <= tsupply, "Token supply exceeded");
+        require(msg.value == chargeRateERC20, "Insufficient funds");
+        
+        uint256 newTokenId = _getNextTokenId();
+        _mint(_to, newTokenId);
+        _incrementTokenId();
+        setInitials(msg.sender,newTokenId);
+        // Transfer the payment to the payment address if there is any
+        payWithToken(msg.value);
+    
+        emit NFTMint( newTokenId, msg.sender, msg.value, block.timestamp);
     
     }
  
@@ -1810,9 +1873,9 @@ contract ReentrancyGuard {
 
 // File: contracts/STAYNEX.sol
 
-contract STAYNEX_GENISIS is TradeableERC721, ReentrancyGuard, ERC2981 {
+contract STAYNEX_GENISIS is TradeableERC721, ReentrancyGuard  {
   string private _baseTokenURI;
-  address public superAdmin = 0x7A48001Cc143051feD84fb3A619bfe8E947Be4c3; // replace with staynex admin wallet address
+
 
   constructor(
     string memory _name,
@@ -1829,8 +1892,8 @@ contract STAYNEX_GENISIS is TradeableERC721, ReentrancyGuard, ERC2981 {
     
   ) TradeableERC721(_name, _symbol, _supply, _proxyRegistryAddress, _version, _gravity_locked, _ERC20, _timeLimit, _redemptionTimeLimit, _maxDaysRedemable) public {
     _baseTokenURI = Strings.strConcat(baseURI, Strings.fromAddress(address(this)), "/");
-    _setDefaultRoyalty(superAdmin, 500); // 5% (500 / 10000) of the sale price of the NFT
   }
+
 
   function transferVersion() public pure returns (string memory) {
     return "1.0.0";
@@ -1845,13 +1908,6 @@ contract STAYNEX_GENISIS is TradeableERC721, ReentrancyGuard, ERC2981 {
     _baseTokenURI = uri;
   }
 
-  
-  
-  function supportsInterface(bytes4 interfaceId) public view returns (bool) {
-    return interfaceId == 0x01ffc9a7 || // IERC165:  bytes4(keccak256('supportsInterface(bytes4)'))
-           interfaceId == 0x80ac58cd || // IERC721:  bytes4(keccak256('balanceOf(address)')) ^ bytes4(keccak256('ownerOf(uint256)')) ^ bytes4(keccak256('approve(address,uint256)')) ^ bytes4(keccak256('getApproved(uint256)')) ^ bytes4(keccak256('setApprovalForAll(address,bool)')) ^ bytes4(keccak256('isApprovedForAll(address,address)')) ^ bytes4(keccak256('transferFrom(address,address,uint256)')) ^ bytes4(keccak256('safeTransferFrom(address,address,uint256)')) ^ bytes4(keccak256('safeTransferFrom(address,address,uint256,bytes)'))
-           interfaceId == 0x2a55205a;   // IERC2981: bytes4(keccak256('royaltyInfo(uint256,uint256)'))
-  }
 
 }
  
