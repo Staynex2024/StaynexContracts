@@ -1,0 +1,15 @@
+{
+  "name": "staynexcontracts",
+  "version": "1.0.0",
+  "description": "```\r 0x7E1cE9b5f485F05496776a3A2aC85e0dFbc04D68 - proxy\r 0x911138d5636995554113f1f2335BF359365393db - STAYNEX20\r 0x085554bd857435864993afa510c1647dbA66de6b - STAYNEX721\r ```",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "sriharikapu",
+  "license": "ISC",
+  "dependencies": {
+    "@truffle/hdwallet-provider": "^2.1.13",
+    "truffle": "^5.11.2"
+  }
+}
